@@ -1,0 +1,76 @@
+#!/bin/sh
+#|-*- mode:lisp -*-|#
+#| <Put a one-line description here>
+exec ros -Q -- $0 "$@"
+|#
+(progn ;;init forms
+  (ros:ensure-asdf)
+  #+quicklisp (ql:quickload '(alexandria bordeaux-threads unix-opts split-sequence) :silent t)
+  )
+
+(defpackage :ros.script.imparallel.3709727499
+  (:use :cl :alexandria))
+(in-package :ros.script.imparallel.3709727499)
+
+(opts:define-opts
+  (:name :help
+   :description "print this help"
+   :short #\h
+   :long "help")
+  (:name :core
+   :description "thread amount [WIP]"
+   :short #\j
+   :arg-parser #'parse-integer
+   :meta-var "THREADS"
+   :long "threads"))
+
+(defun unknown-option (condition)
+  (format t "warning: ~s option is unknown!~%" (opts:option condition))
+  (invoke-restart 'opts:skip-option))
+
+(defmacro when-option ((options opt) &body body)
+  `(let ((it (getf ,options ,opt)))
+     (when it
+       ,@body)))
+
+(defvar *core* 1)
+
+(defun build-command (free-args)
+  (apply #'map-product #'list (split-sequence:split-sequence ":::" free-args :test #'string=)))
+
+(defun do-command (commands)
+  (format t "command: ~a~%" commands))
+
+(defun main (&rest argv)
+  (declare (ignorable argv))
+  (multiple-value-bind (options free-args)
+      (handler-case
+          (handler-bind ((opts:unknown-option #'unknown-option))
+            (opts:get-opts argv))
+        (opts:missing-arg (condition)
+          (format t "fatal:option ~s needs an argument!~%"
+                  (opts:option condition)))
+        (opts:arg-parser-failed (condition)
+          (format t "fatal: cannot parse ~s as argument of ~s~%"
+                  (opts:raw-arg condition)
+                  (opts:option condition))))
+    ;;; main logic
+    (declare (ignorable free-args))
+    (when-option (options :help)
+      (opts:describe
+       :prefix "imparallel -- imitation of parallel"
+       :usage-of "imparallel"
+       :args "[commands]")
+      (return-from main 1))
+    (when-option (options :core)
+      (setf *core* it))
+    (format t "DEBUG: core is ~a!~%free arg is ~s!~%" *core* free-args)
+    (format t "DEBUG: freeargs: ~a!~%" (build-command free-args))
+    (let* ((ths (mapcar
+                 #'(lambda (commands)
+                     (declare (ignorable commands))
+                     (bt:make-thread #'(lambda () (do-command commands))))
+                 (build-command free-args))))
+      (mapcar #'bt:join-thread ths)))
+  )
+;;; vim: set ft=lisp lisp:
